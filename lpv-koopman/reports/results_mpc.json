@@ -1,0 +1,25 @@
+{
+ "stabilization": {
+  "x0": [
+   -0.6788387683228809,
+   0.1343090904588331
+  ],
+  "norm_at_2s": 0.03697736535404022,
+  "norm_at_4s": 0.0013723191720451293,
+  "norm_final": 5.3568707184370206e-05,
+  "u_max": 0.9999999999999999,
+  "mean_solve_ms": 11.267566560000736,
+  "wall_s": 7.2
+ },
+ "sine_tracking": {
+  "rms_after_1s": 0.004118737978434524,
+  "max_abs_err_after_1s": 0.006903488814827496,
+  "u_max": 0.9999999999999999
+ },
+ "step_tracking": {
+  "settled_rms": 0.06634159007127016,
+  "settled_std_segment1": 0.014886729163876388,
+  "u_max": 0.9999999999999999,
+  "note": "residual bias from model stationarity error at off-origin equilibria; see report"
+ }
+}
