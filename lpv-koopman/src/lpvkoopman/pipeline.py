@@ -25,6 +25,23 @@ class FitConfig:
     maxiter: int = 1000
     seed: int = 0
     base_eigs: Array | None = None  # override DMD base (e.g. linearization)
+    constant_components: tuple[int, ...] = ()
+    """State components known to be constant along every training trajectory
+    (e.g. x3 = u in an input-extended system, where x3dot = 0 autonomously).
+    Such a component is fitted exactly - single eigenvalue lambda = 0,
+    boundary value = the trajectory's constant - instead of burning
+    optimizer budget rediscovering it. Its entry in a per-component
+    ``n_eig`` list is ignored (the block always has size 1)."""
+    boundary_rcond: float = 1e-12
+    """lstsq cutoff for the *final* boundary fit (eigenvalue refinement is
+    untouched). The refined basis V can be nearly rank-deficient; at the
+    default cutoff the near-null directions receive arbitrary huge
+    coefficients (|z| ~ 1e2 observed on input-extended data). Those
+    coordinates cancel in the reconstruction C z, so autonomous predictions
+    barely notice - but eigenfunction *gradients* (the LPV B(x)) inherit
+    the full roughness. A cutoff ~1e-3 zeroes the ill-determined directions
+    at a small autonomous cost (measured on the non-affine benchmark:
+    median 1.6% -> 2.3% autonomous, forced LPV rollout 36% -> 13%)."""
     fit_horizon: float | None = None
     """If set, eigenvalues and boundary values are fitted on the trajectory
     prefix t <= fit_horizon only, while eigenfunction values are tabulated
@@ -83,6 +100,21 @@ def fit_koopman_model(
     components: list[ComponentFit] = []
     for i in range(n):
         H = data.component(i)[fit_mask]  # (n_fit, M_t)
+        if i in cfg.constant_components:
+            vals = H[0].copy()  # (M_t,) the per-trajectory constants
+            resid = float(((H - vals[None, :]) ** 2).sum())
+            spec = Spectrum(pairs=np.empty((0, 2)), reals=np.array([0.0]))
+            comp_info = {
+                "constant_component": True,
+                "lattice_cost": resid,
+                "optimized_cost": resid,
+                "spectrum": str(spec),
+            }
+            components.append(
+                ComponentFit(spec=spec, G=vals[None, :], cost=resid, info=comp_info)
+            )
+            report.components.append(comp_info)
+            continue
         spec0 = lattice_spectrum(base, budgets[i])
         J_lattice = projection_cost(spec0, t_fit, H)
         if cfg.optimize:
@@ -107,7 +139,7 @@ def fit_koopman_model(
             comp_info = {"lattice_cost": J_lattice, "optimized_cost": None}
 
         V = basis_matrix(spec, t_fit)
-        G, _ = fit_boundary(V, H)
+        G, _ = fit_boundary(V, H, rcond=cfg.boundary_rcond)
         components.append(ComponentFit(spec=spec, G=G, cost=J, info=comp_info))
         comp_info["spectrum"] = str(spec)
         report.components.append(comp_info)

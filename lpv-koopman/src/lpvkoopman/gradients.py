@@ -45,37 +45,43 @@ def lift_jacobian_mls(
     weighted polynomial model (degree 1 or 2) per lifted coordinate; the
     gradient is the model's linear term evaluated at the query point.
     Weights: Wendland-type (1 - (d/d_max)^3)^3.
+
+    Caveat for strongly anisotropic clouds: on input-extended data the
+    samples live on planes x_{n+1} = u_level, whose spacing is much larger
+    than the in-plane sample distance. The k nearest neighbors then all
+    share one plane and the cross-plane derivative is unidentifiable
+    (the design matrix column is constant, so lstsq returns ~0 for it).
+    Use ``lift_jacobian_fd`` with a per-dimension step there - its
+    cross-plane secant through the interpolant is well posed.
     """
     x = np.asarray(x, dtype=float)
     single = x.ndim == 1
     Q = np.atleast_2d(x)
     n = Q.shape[1]
-    if n != 2:
-        raise NotImplementedError("MLS gradients currently assume 2-D state")
 
     dist, idx = model._tree.query(Q, k=k_neighbors)
     out = np.empty((len(Q), model.N, n))
     for q in range(len(Q)):
-        P = model.points[idx[q]] - Q[q]  # (k, 2) offsets
+        P = model.points[idx[q]] - Q[q]  # (k, n) offsets
         scale = max(dist[q].max(), 1e-12)
         Ps = P / scale
         d = dist[q] / scale
         w = (1.0 - np.minimum(d, 1.0) ** 3) ** 3 + 1e-6
-        cols = [np.ones(len(Ps)), Ps[:, 0], Ps[:, 1]]
+        cols = [np.ones(len(Ps))] + [Ps[:, i] for i in range(n)]
         if degree >= 2:
-            cols += [Ps[:, 0] ** 2, Ps[:, 0] * Ps[:, 1], Ps[:, 1] ** 2]
+            cols += [Ps[:, i] * Ps[:, j] for i in range(n) for j in range(i, n)]
         Dmat = np.column_stack(cols)
         sw = np.sqrt(w)[:, None]
         Zn = model.lifted_at_points[idx[q]]  # (k, N)
         coef, *_ = np.linalg.lstsq(sw * Dmat, sw * Zn, rcond=None)
-        out[q] = coef[1:3].T / scale  # d/dx of the local model at offset 0
+        out[q] = coef[1 : 1 + n].T / scale  # d/dx of the local model at offset 0
     return out[0] if single else out
 
 
 def lift_jacobian_fd(
     model: KoopmanEigenModel,
     x: Array,
-    h: float = 1e-3,
+    h: float | Array = 1e-3,
     order: int = 4,
 ) -> Array:
     """Finite-difference Jacobian of the *interpolated* lift.
@@ -83,24 +89,31 @@ def lift_jacobian_fd(
     Mirrors the reference implementation's approach (build_B_numgrad.m used
     order-2/4 central stencils; note it defaulted to h = 0.1, far too coarse
     for features of size ~0.05 - measured in the validation report).
+
+    ``h`` may be a scalar or a per-dimension array: on input-extended data
+    the natural step differs by direction (small in-plane, roughly half the
+    u-level spacing across planes, where the piecewise-linear interpolant
+    makes the central difference an exact secant between planes).
     """
     x = np.asarray(x, dtype=float)
     single = x.ndim == 1
     Q = np.atleast_2d(x)
     n = Q.shape[1]
+    h_vec = np.broadcast_to(np.asarray(h, dtype=float), (n,))
     out = np.empty((len(Q), model.N, n))
     for j in range(n):
         e = np.zeros(n)
-        e[j] = h
+        hj = h_vec[j]
+        e[j] = hj
         if order == 2:
-            out[:, :, j] = (model.lift(Q + e) - model.lift(Q - e)) / (2 * h)
+            out[:, :, j] = (model.lift(Q + e) - model.lift(Q - e)) / (2 * hj)
         elif order == 4:
             out[:, :, j] = (
                 -model.lift(Q + 2 * e)
                 + 8 * model.lift(Q + e)
                 - 8 * model.lift(Q - e)
                 + model.lift(Q - 2 * e)
-            ) / (12 * h)
+            ) / (12 * hj)
         else:
             raise ValueError("order must be 2 or 4")
     return out[0] if single else out

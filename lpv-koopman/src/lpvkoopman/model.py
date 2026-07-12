@@ -115,6 +115,8 @@ class KoopmanEigenModel:
         if interpolation == "linear":
             self._interp = LinearNDInterpolator(self._tri, lifted_at_points)
         elif interpolation == "cubic":
+            if points.shape[1] != 2:
+                raise ValueError("cubic (Clough-Tocher) interpolation is 2-D only")
             self._interp = CloughTocher2DInterpolator(self._tri, lifted_at_points)
         else:
             raise ValueError(f"unknown interpolation '{interpolation}'")
