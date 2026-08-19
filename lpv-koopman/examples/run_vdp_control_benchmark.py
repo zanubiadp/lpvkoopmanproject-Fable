@@ -232,6 +232,32 @@ def main() -> int:
     fig.savefig(figdir / "fig8_B_gain_map.png", dpi=150)
     plt.close(fig)
 
+    # Analogous figure for the constant-B reduction (bconst, degree=0), the
+    # LTI baseline structurally comparable to Korda & Mezic's constant input
+    # matrix. Unlike the fitted LPV field, this evaluates the *same* model
+    # class the K-M benchmark uses, so it is a fair sanity check: the value
+    # is guaranteed spatially uniform (degree-0 fit), but is computed from
+    # the actual least-squares fit rather than assumed to equal the exact
+    # answer.
+    gx = np.linspace(-0.85, 0.85, 60)
+    gy = np.linspace(-0.9, 0.9, 60)
+    GX, GY = np.meshgrid(gx, gy)
+    CB_const = np.full(GX.shape, np.nan)
+    pts = np.column_stack([GX.ravel(), GY.ravel()])
+    inside = poly.contains_points(pts)
+    for i, p in enumerate(pts):
+        if inside[i]:
+            CB_const.ravel()[i] = (model.C @ bconst(p))[1, 0]
+    fig, ax = plt.subplots(figsize=(6.2, 5.2))
+    pc = ax.pcolormesh(GX, GY, CB_const, shading="auto", cmap="RdBu_r", vmin=0.7, vmax=1.3)
+    fig.colorbar(pc, ax=ax, label=r"$(C\,B_{\mathrm{const}})_2$   (exact value: 1)")
+    ax.plot(lc[:, 0], lc[:, 1], "k-", lw=1.5)
+    ax.set_xlabel("$x_1$"); ax.set_ylabel("$x_2$"); ax.set_aspect("equal")
+    ax.set_title("Output-projected input gain of the constant-B (LTI) reduction")
+    fig.tight_layout()
+    fig.savefig(figdir / "fig8b_B_gain_map_const.png", dpi=150)
+    plt.close(fig)
+
     (out / "results_control.json").write_text(json.dumps(results, indent=1))
     print(f"\nresults -> {out/'results_control.json'}")
     print(f"figures -> {figdir}/fig6..fig8")

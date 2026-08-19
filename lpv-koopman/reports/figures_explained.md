@@ -131,6 +131,8 @@ including right next to the limit cycle — which is the headline result of
 visibly brighter (yellow, ~log₁₀ ≈ 1.4, i.e. ~25 %) dot near the top-right
 of the cycle is the model's single worst case among the 500 test points.
 
+**Why initial conditions stay on a circle**: because, based on the paper, trajectory should start from a non recurrent surface/set (start there and never return to it), and the circle is the simplest star-shaped curve (the reason star-shapedness suffices here specifically is a Poincaré–Bendixson argument: in the annulus between the unstable focus and the attracting limit cycle there's no other invariant set, so the radius r(t) is monotonic along every orbit).
+
 ---
 
 ### `fig2_eigenvalues.png`
@@ -222,6 +224,9 @@ mean once the model has enough eigenfunctions to overfit the interior
 eigenfunction budget, the full-interior error (which is the harder number)
 falls monotonically to well under 1 % by N = 40 — undercutting even the
 interior-only paper-configuration curve.
+
+**Why there's a small residual gap - algorithmic differences**: 
+As explaine in [README.md](lpv-koopman/README.md#L175) there are some deliberate design choices made where such choices are not explicitly described in the paper.
 
 ---
 
