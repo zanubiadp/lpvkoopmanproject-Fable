@@ -127,7 +127,12 @@ def vdp_scaled() -> ContinuousSystem:
 
 
 def vdp_classic(mu: float = 1.0) -> ContinuousSystem:
-    """Textbook Van der Pol oscillator x1dot = x2, x2dot = mu(1-x1^2)x2 - x1."""
+    """Textbook Van der Pol oscillator
+    
+        x1dot = x2
+        x2dot = mu(1-x1^2)x2 - x1.
+    
+    """
 
     def f(x: Array) -> Array:
         x = np.asarray(x, dtype=float)

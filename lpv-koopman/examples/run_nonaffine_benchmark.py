@@ -48,18 +48,18 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from lpvkoopman import (
-    FitConfig,
-    extend_input,
-    fit_b_field,
-    fit_b_knn,
-    fit_constant_b_forced,
-    fit_koopman_model,
-    make_extended_training_data,
-    predict_forced,
-    simulate_true,
-    u_profile_to_v,
-    vdp_nonaffine,
+from lpvkoopman import (            # function defined inside
+    FitConfig,                          # pipeline.py
+    extend_input,                       # nonaffine.py
+    fit_b_field,                        # lpv.py
+    fit_b_knn,                          # lpv.py
+    fit_constant_b_forced,              # lpv.py
+    fit_koopman_model,                  # pipeline.py
+    make_extended_training_data,        # nonaffine.py
+    predict_forced,                     # lpv.py
+    simulate_true,                      # nonaffine.py
+    u_profile_to_v,                     # nonaffine.py
+    vdp_nonaffine,                      # nonaffine.py
 )
 from lpvkoopman.metrics import relative_rmse_percent
 from lpvkoopman.nonaffine import frozen, level_limit_cycle
@@ -341,7 +341,9 @@ def main() -> int:
             ax = axes[row, col]
             ax.plot(t_plot, xt[:, row], "b-", lw=1.8, label="true")
             ax.plot(t_plot, preds["lpv_knn"][:, row], "r--", lw=1.5,
-                    label="LPV $B(x)$ (ours, autonomous data)")
+                    label="LPV $B(x)$ (ours, knn, autonomous data)")
+            ax.plot(t_plot, preds["lpv_poly3"][:, row], "m--", lw=1.5,
+                    label="LPV $B(x)$ (ours, poly, autonomous data)")
             ax.plot(t_plot, preds["km_const_forced"][:, row], "g-.", lw=1.5,
                     label="constant $B$ (Korda-Mezic, forced data)")
             if row == 0:

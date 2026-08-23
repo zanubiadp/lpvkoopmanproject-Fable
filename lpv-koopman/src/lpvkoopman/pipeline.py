@@ -93,7 +93,7 @@ def fit_koopman_model(
     base = (
         np.asarray(cfg.base_eigs, dtype=complex)
         if cfg.base_eigs is not None
-        else dmd_eigenvalues(data.X[:, fit_mask], data.ts)
+        else dmd_eigenvalues(data.X[:, fit_mask], data.ts)          # dmd_eigenvalues is defined inside spectrum.py
     )
 
     report = FitReport(dmd_base=base)

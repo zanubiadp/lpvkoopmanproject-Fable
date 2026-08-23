@@ -1,24 +1,36 @@
 {
- "stabilization": {
+ "stabilization LPV nonaffine": {
   "x0": [
-   -0.6788387683228809,
-   0.1343090904588331
+   -0.7343543947233346,
+   0.09905022972273442,
+   0.0
   ],
-  "norm_at_2s": 0.03697736535404022,
-  "norm_at_4s": 0.0013723191720451293,
-  "norm_final": 5.3568707184370206e-05,
+  "norm_at_2s": 1.1355778130596048,
+  "norm_at_4s": 0.6722728494467487,
+  "norm_final": 1.058292655698702,
   "u_max": 0.9999999999999999,
-  "mean_solve_ms": 11.267566560000736,
-  "wall_s": 7.2
+  "mean_solve_ms": 13.488486401256523,
+  "wall_s": 8.5
  },
- "sine_tracking": {
-  "rms_after_1s": 0.004118737978434524,
-  "max_abs_err_after_1s": 0.006903488814827496,
+ "sine_tracking_LPV_nonaffine": {
+  "rms_after_1s": 0.5339210695432569,
+  "max_abs_err_after_1s": 0.7891909994604005,
   "u_max": 0.9999999999999999
  },
- "step_tracking": {
-  "settled_rms": 0.06634159007127016,
-  "settled_std_segment1": 0.014886729163876388,
+ "sine_tracking_KM_nonaffine": {
+  "rms_after_1s": 0.6731696795661027,
+  "max_abs_err_after_1s": 0.9353307270030397,
+  "u_max": 0.9999999999999999
+ },
+ "step_tracking_LPV_nonaffine": {
+  "settled_rms": 0.5211038429321982,
+  "settled_std_segment1": 0.09710693665138126,
+  "u_max": 0.9999999999999999,
+  "note": "residual bias from model stationarity error at off-origin equilibria; see report"
+ },
+ "step_tracking_KM_nonaffine": {
+  "settled_rms": 0.6335153933179836,
+  "settled_std_segment1": 0.05077321511812885,
   "u_max": 0.9999999999999999,
   "note": "residual bias from model stationarity error at off-origin equilibria; see report"
  }

@@ -229,7 +229,7 @@ def main() -> int:
     ax.set_xlabel("$x_1$"); ax.set_ylabel("$x_2$"); ax.set_aspect("equal")
     ax.set_title("Output-projected input gain of the fitted B(x)")
     fig.tight_layout()
-    fig.savefig(figdir / "fig8_B_gain_map.png", dpi=150)
+    fig.savefig(figdir / "fig8a_B_gain_map.png", dpi=150)
     plt.close(fig)
 
     # Analogous figure for the constant-B reduction (bconst, degree=0), the

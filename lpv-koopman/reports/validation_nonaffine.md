@@ -132,6 +132,8 @@ the monotone-gain region |u| < π/4; **dwell** sits past the gain flip;
   the constant-B rollout bends the wrong way exactly when u dwells in the
   reversed-gain band.
 
+![](figures/fig13_forced_comparison.svg)
+
 ## 6. What made it work (numbers from the prototyping runs)
 
 The naive port of the 2-D control pipeline **failed** — the first attempt
