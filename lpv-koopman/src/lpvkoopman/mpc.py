@@ -42,12 +42,35 @@ class MPCConfig:
     S: float = 1e-2  # input increment weight
     u_min: float = -1.0
     u_max: float = 1.0
+    integrator_state: int | None = None
+    """Index of a state that is the *integral* of the applied input.
+
+    For the input-extended (non-affine) plant the MPC's input is v = udot
+    while the physical actuator command is the extra state x3 = u; boxing v
+    with ``u_min/u_max`` then imposes a slew limit and leaves u itself
+    completely unconstrained, so the loop happily drives u outside the range
+    the model was identified on (where ``lift`` degrades to nearest-neighbor
+    values and every prediction is meaningless).
+
+    Setting ``integrator_state=2`` re-parameterizes the decision variable
+    from the rate sequence to the *actuator* sequence u_1..u_Np, using the
+    exact relation v_k = (u_{k+1} - u_k)/ts. That map is linear and
+    bidiagonal, so the problem stays a box-constrained least-squares one and
+    ``u_min/u_max`` become a hard constraint on u itself. The rate is then
+    shaped by ``R`` (which still weighs v) rather than bounded.
+    """
+
+
+def _difference_matrix(n_blocks: int, m: int) -> Array:
+    """First-difference operator on a stacked (n_blocks, m) sequence."""
+    return np.eye(n_blocks * m) - np.eye(n_blocks * m, k=-m)
 
 
 @dataclass
 class MPCSolution:
-    u0: Array
-    U: Array  # (Np, m) planned inputs
+    u0: Array  # input actually applied to the plant this step
+    U: Array  # (Np, m) planned decision-variable sequence -- the inputs
+    # themselves, or the actuator trajectory u when ``integrator_state`` is set
     Y: Array  # (Np, n) predicted outputs
     cost: float
 
@@ -58,10 +81,12 @@ class KoopmanMPC:
         model: KoopmanEigenModel,
         bmap: BMap | Array,
         config: MPCConfig | None = None,
+        x_clip: tuple[Array, Array] | None = None,
     ):
         self.model = model
         self.bmap = bmap
         self.cfg = config or MPCConfig()
+        self.x_clip = x_clip
         self.Ad, self.Gam = discretize(model, self.cfg.ts)
         self.C = model.C
         self.n_out = self.C.shape[0]
@@ -74,7 +99,11 @@ class KoopmanMPC:
             self._CAk[k] = M
 
     def _input_matrix(self, x: Array) -> Array:
-        B = self.bmap(x) if callable(self.bmap) else self.bmap
+        if callable(self.bmap):
+            xb = x if self.x_clip is None else np.clip(x, *self.x_clip)
+            B = self.bmap(xb)  # B(x) is only identified over the sampled box
+        else:
+            B = self.bmap
         return self.Gam @ B  # (N, m)
 
     def solve(self, x: Array, r_seq: Array, u_prev: Array | None = None) -> MPCSolution:
@@ -116,7 +145,7 @@ class KoopmanMPC:
             rows.append(np.sqrt(cfg.R) * np.eye(Np * m))
             rhs.append(np.zeros(Np * m))
         if cfg.S > 0:
-            D = np.eye(Np * m) - np.eye(Np * m, k=-m)
+            D = _difference_matrix(Np, m)
             d0 = np.zeros(Np * m)
             d0[:m] = u_prev
             rows.append(np.sqrt(cfg.S) * D)
@@ -124,13 +153,28 @@ class KoopmanMPC:
         Fls = np.vstack(rows)
         bls = np.concatenate(rhs)
 
+        if cfg.integrator_state is not None:
+            # decision variable becomes the actuator sequence w = u_1..u_Np,
+            # with the exact substitution v = (D w - e0 w_0) / ts; the box
+            # then constrains u itself instead of its rate.
+            w0 = float(np.asarray(x, dtype=float)[cfg.integrator_state])
+            Dw = _difference_matrix(Np, m) / cfg.ts
+            c = np.zeros(Np * m)
+            c[:m] = -w0 / cfg.ts
+            bls = bls - Fls @ c
+            Fls = Fls @ Dw
+
         res = lsq_linear(
             Fls, bls, bounds=(cfg.u_min, cfg.u_max), method="trf",
             tol=1e-10, max_iter=200,
         )
-        U = res.x.reshape(Np, m)
-        Y = F0 + (G @ res.x).reshape(Np, self.n_out)
-        return MPCSolution(u0=U[0], U=U, Y=Y, cost=float(res.cost))
+        if cfg.integrator_state is not None:
+            W = res.x.reshape(Np, m)  # planned actuator trajectory
+            V = (Dw @ res.x + c).reshape(Np, m)  # the rates actually applied
+        else:
+            W = V = res.x.reshape(Np, m)
+        Y = F0 + (G @ V.reshape(-1)).reshape(Np, self.n_out)
+        return MPCSolution(u0=V[0], U=W, Y=Y, cost=float(res.cost))
 
 
 @dataclass

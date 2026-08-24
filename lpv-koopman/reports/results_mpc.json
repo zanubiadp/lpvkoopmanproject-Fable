@@ -1,37 +1,97 @@
 {
- "stabilization LPV nonaffine": {
-  "x0": [
-   -0.7343543947233346,
-   0.09905022972273442,
-   0.0
-  ],
-  "norm_at_2s": 1.1355778130596048,
-  "norm_at_4s": 0.6722728494467487,
-  "norm_final": 1.058292655698702,
-  "u_max": 0.9999999999999999,
-  "mean_solve_ms": 13.488486401256523,
-  "wall_s": 8.5
+ "affine": {
+  "stabilization": {
+   "x0": [
+    -0.6788387683228823,
+    0.13430909045883294
+   ],
+   "norm_at_2s": 0.03751101903679804,
+   "norm_at_4s": 0.0013741940943124181,
+   "norm_final": 5.3100355119094554e-05,
+   "u_max": 0.9999999999999999,
+   "mean_solve_ms": 5.702741370017368,
+   "wall_s": 3.7
+  },
+  "sine_tracking": {
+   "rms_after_1s": 0.004086115344167727,
+   "max_abs_err_after_1s": 0.0068838933644901346,
+   "u_max": 0.9999999999999999
+  },
+  "step_tracking": {
+   "settled_rms": 0.07160994733877384,
+   "settled_std_segment1": 0.014912327032937222,
+   "u_max": 0.9999999999999999,
+   "note": "residual bias from model stationarity error at off-origin equilibria; see report"
+  }
  },
- "sine_tracking_LPV_nonaffine": {
-  "rms_after_1s": 0.5339210695432569,
-  "max_abs_err_after_1s": 0.7891909994604005,
-  "u_max": 0.9999999999999999
- },
- "sine_tracking_KM_nonaffine": {
-  "rms_after_1s": 0.6731696795661027,
-  "max_abs_err_after_1s": 0.9353307270030397,
-  "u_max": 0.9999999999999999
- },
- "step_tracking_LPV_nonaffine": {
-  "settled_rms": 0.5211038429321982,
-  "settled_std_segment1": 0.09710693665138126,
-  "u_max": 0.9999999999999999,
-  "note": "residual bias from model stationarity error at off-origin equilibria; see report"
- },
- "step_tracking_KM_nonaffine": {
-  "settled_rms": 0.6335153933179836,
-  "settled_std_segment1": 0.05077321511812885,
-  "u_max": 0.9999999999999999,
-  "note": "residual bias from model stationarity error at off-origin equilibria; see report"
+ "nonaffine": {
+  "stabilization_lpv": {
+   "x0": [
+    -0.18446705660947887,
+    0.036497035450769814,
+    0.0
+   ],
+   "norm_at_2s": 0.05484821972694892,
+   "norm_at_4s": 0.044381294514359806,
+   "norm_final": 0.9328840096501294,
+   "min_norm": 0.013938567961869378,
+   "t_at_min_s": 8.700000000000001,
+   "tail_max": 1.0020513280936394,
+   "u_max": 1.15,
+   "mean_solve_ms": 13.520992035555537,
+   "wall_s": 2.9
+  },
+  "stabilization_const": {
+   "x0": [
+    -0.18446705660947887,
+    0.036497035450769814,
+    0.0
+   ],
+   "norm_at_2s": 0.8271195477353903,
+   "norm_at_4s": 0.5008609369393556,
+   "norm_final": 0.5624841031476401,
+   "min_norm": 0.18368801215112807,
+   "t_at_min_s": 0.2,
+   "tail_max": 1.2583879141214558,
+   "u_max": 1.15,
+   "mean_solve_ms": 21.155035354968277,
+   "wall_s": 4.4
+  },
+  "sine_tracking_lpv": {
+   "amplitude": 0.1,
+   "omega": 0.8,
+   "rms_after_2s": 0.5051334730086809,
+   "rms_over_amplitude": 5.051334730086809,
+   "max_abs_err_after_2s": 0.910452072199487,
+   "u_max": 1.15,
+   "wall_s": 2.2
+  },
+  "sine_tracking_const": {
+   "amplitude": 0.1,
+   "omega": 0.8,
+   "rms_after_2s": 0.08457807793766906,
+   "rms_over_amplitude": 0.8457807793766905,
+   "max_abs_err_after_2s": 0.13522582465501876,
+   "u_max": 0.21591666785201685,
+   "wall_s": 1.2
+  },
+  "step_tracking_lpv": {
+   "amplitude": 0.1,
+   "dwell_s": 4.0,
+   "settled_rms": 0.5701657468550737,
+   "settled_rms_over_amplitude": 5.701657468550737,
+   "u_max": 1.1500000000000001,
+   "wall_s": 5.8,
+   "note": "residual bias from the model's stationarity error at off-origin equilibria, compounded by the collapsing recoverable margin above the setpoint; see fig17"
+  },
+  "step_tracking_const": {
+   "amplitude": 0.1,
+   "dwell_s": 4.0,
+   "settled_rms": 0.6645472968881526,
+   "settled_rms_over_amplitude": 6.645472968881526,
+   "u_max": 1.1500000000000001,
+   "wall_s": 6.0,
+   "note": "residual bias from the model's stationarity error at off-origin equilibria, compounded by the collapsing recoverable margin above the setpoint; see fig17"
+  }
  }
 }

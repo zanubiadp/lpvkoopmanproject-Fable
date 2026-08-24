@@ -17,8 +17,9 @@ into `reports/figures/`:
 |---|---|---|---|
 | fig1 – fig5 | `examples/run_vdp_benchmark.py` | autonomous (uncontrolled) Koopman model of the Van der Pol oscillator | ~3 min |
 | fig6 – fig8 | `examples/run_vdp_control_benchmark.py` | the LPV input matrix B(x) and forced prediction | ~3 min |
-| fig9 – fig10 | `examples/run_vdp_mpc.py` | closed-loop Koopman-LPV MPC on the true plant | ~4 min |
+| fig9 – fig10 | `examples/run_vdp_mpc.py` | closed-loop Koopman-LPV MPC on the affine plant | ~12 min (whole script) |
 | fig11 – fig14 | `examples/run_nonaffine_benchmark.py` | the non-affine input, its exact extension, LPV vs constant B | ~15 min (~7 min `--quick`) |
+| fig15 – fig17 | `examples/run_vdp_mpc.py` | closed-loop MPC on the *non-affine* plant: LPV B(x) vs constant B, plus the actuation limits that set the tasks | (same script as fig9–fig10) |
 
 Every script is deterministic given its fixed `np.random.default_rng(seed)`
 calls (seeds are called out per figure below), matplotlib backend `Agg`,
@@ -749,6 +750,71 @@ input response).
 
 ---
 
+### `fig15_mpc_stabilization_nonaffine.png`
+
+![](figures/fig15_mpc_stabilization_nonaffine.png)
+
+Task 1 on the non-affine plant, both input models at identical weights
+(Q = (1, 0.05, 0.1), R = 1e-4, S = 1e-2, horizon 8 s at a 0.1 s control
+rate). x₀ = 0.25·lc[800], i.e. ‖x₀‖ = 0.188 — chosen to sit inside the
+origin's null-controllable region, whose reach is only 0.31 (see fig17).
+
+* **left** — phase plane. The LPV loop (green) spirals into the origin;
+  the constant-B loop (purple) never approaches it and settles onto the
+  limit cycle, effectively indistinguishable from the open-loop run (grey).
+* **middle** — ‖(x₁,x₂)‖ on a log axis. This is the panel that carries the
+  result: green reaches 1.4e-2 at t = 8.7 s and stays below 0.1 for 8.7 s,
+  then escapes after t ≈ 10 s. Purple never drops below its own initial
+  value. **The run is deliberately 20 s long**: an 8 s window ends before
+  the escape and makes the LPV arm look asymptotically stable, which it is
+  not.
+* **right** — the actuator u = x₃ with its ±1.15 box (dotted). Note this is
+  *u*, not the MPC's decision variable: for the extended plant the MPC
+  commands v = u̇, and the box is enforced on u exactly via
+  `MPCConfig.integrator_state`. The constant-B arm is hard against the
+  bound almost throughout.
+
+### `fig16_mpc_tracking_nonaffine.png`
+
+![](figures/fig16_mpc_tracking_nonaffine.png)
+
+Tasks 2 and 3, three rows: tracked output x₁ against the reference, the
+actuator u = x₃ with its box, and the MPC's actual input v = u̇. Amplitudes
+are 0.10 (not the affine benchmark's 0.3/0.25) because the plant cannot
+reach the larger ones at all — fig17.
+
+Read honestly, this figure is a **negative result for the LPV field**: on
+the sine the constant-B arm tracks (RMS 0.085) while the LPV arm escapes at
+t ≈ 6.5 s (RMS 0.505), and on the switching setpoints **both arms fail**.
+The v row shows the rate is only penalised, not bounded — spikes reach ±23,
+so a plant needing a true slew limit would want a general QP rather than the
+bounded-least-squares solve used here.
+
+### `fig17_actuation_limits.png`
+
+![](figures/fig17_actuation_limits.png)
+
+Why the three affine tasks were rescaled rather than re-tuned. The affine
+plant has g = (0,1), i.e. authority ±1.0 on ẋ₂; the non-affine plant's input
+enters as w(x,u) = (0.15 + 0.5x₂)sin(2u) + 0.25x₁u², worth **±0.15 at the
+origin** — about 1/7 as much — against the same unstable focus.
+
+* **left** — for the sine task, the w demanded by exact tracking (line) vs
+  the w the actuator can produce at that state (band). The affine
+  A=0.3/ω=1.2 demand (red) leaves its band over 54 % of the period; the
+  rescaled A=0.1/ω=0.8 demand (green) stays inside.
+* **middle** — for constant setpoints, required w = 0.8r against the
+  achievable band. The affine ±0.25 sits just outside (needs 0.2000,
+  achievable 0.1989); ±0.10 has margin.
+* **right** — the origin's null-controllable region (states steerable to the
+  origin under |u| ≤ 1.15), sampled by reversing time and integrating the
+  extremal bang-bang branches. It reaches ‖x‖ = 0.31. The affine task's x₀
+  (red, ‖x‖ = 0.69) is 2.25× outside it, so **no** controller can perform
+  the original task 1 — confirmed independently by a true-model oracle MPC,
+  which also fails from there.
+
+---
+
 ## Reproducing any figure from scratch
 
 ```bash
@@ -756,7 +822,8 @@ cd lpv-koopman
 pip install -e .[dev]
 python examples/run_vdp_benchmark.py           # -> fig1..fig5
 python examples/run_vdp_control_benchmark.py   # -> fig6..fig8 (reuses/creates model_n40.pkl)
-python examples/run_vdp_mpc.py                 # -> fig9, fig10 (reuses model_n40.pkl)
+python examples/run_vdp_mpc.py                 # -> fig9, fig10, fig15..fig17
+                                               #    (reuses model_n40.pkl + model_nonaffine.pkl)
 python examples/run_nonaffine_benchmark.py     # -> fig11..fig14 (creates model_nonaffine.pkl)
 ```
 
