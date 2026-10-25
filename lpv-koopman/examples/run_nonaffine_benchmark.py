@@ -15,28 +15,29 @@ quantifies the LPV input matrix's advantage over a constant one:
 
   1. autonomous data collection at constant-u levels (thesis protocol) and
      eigenfunction learning on the 3-D extended state, x3 handled exactly
-     (lambda = 0, ``constant_components``);
+     (lambda = 0, ``constant_components``) - the shared model of
+     ``extended_vdp.get_model``;
   2. autonomous validation at *held-out* u levels (never trained on);
-  3. input models on the SAME lifted dynamics:
+  3. input models on the SAME lifted dynamics (``extended_vdp.fit_input_models``):
        - ours:   LPV B(x) = dPhi/dx3 from autonomous data only
-                 (kNN-smoothed gradient field + global polynomial variant),
+                 (kNN-smoothed gradient field),
        - baseline: Korda & Mezic constant B, least-squares fitted to
                  forced experiments (which the LPV never needs),
-       - controls: constant reduction of the LPV field, and B = 0;
-  4. three-way forced trajectory comparison (true / LPV / constant-B) on
+       - ablations, reported in the tables only: global polynomial LPV
+                 variant, constant reduction of the LPV field, and B = 0;
+  4. forced trajectory comparison (true / LPV / Korda-Mezic constant B) on
      three input families: gentle (never leaves the monotone-gain region),
      dwell (sits past the gain flip), sweep (crosses it repeatedly);
-  5. figures fig11-fig14 + reports/results_nonaffine.json.
+  5. figures fig11-fig14 + reports/results_nonaffine.json. The comparison
+     figures (fig13, fig14) show only the two headline models.
 
-Run:  python examples/run_nonaffine_benchmark.py            (~15 min)
-      python examples/run_nonaffine_benchmark.py --quick    (~7 min)
+Run:  python examples/run_nonaffine_benchmark.py   (~3 min with the model
+      cached in reports/model_nonaffine.pkl; fitting it adds ~3.5 min)
 """
 from __future__ import annotations
 
 import argparse
 import json
-import pickle
-import sys
 import time
 from pathlib import Path
 
@@ -46,56 +47,13 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
-from lpvkoopman import (            # function defined inside
-    FitConfig,                          # pipeline.py
-    extend_input,                       # nonaffine.py
-    fit_b_field,                        # lpv.py
-    fit_b_knn,                          # lpv.py
-    fit_constant_b_forced,              # lpv.py
-    fit_koopman_model,                  # pipeline.py
-    make_extended_training_data,        # nonaffine.py
-    predict_forced,                     # lpv.py
-    simulate_true,                      # nonaffine.py
-    u_profile_to_v,                     # nonaffine.py
-    vdp_nonaffine,                      # nonaffine.py
-)
+from extended_vdp import KM, LPV, TS, U_MAX, fit_input_models, get_model
+from lpvkoopman import predict_forced, simulate_true, u_profile_to_v, vdp_nonaffine
 from lpvkoopman.metrics import relative_rmse_percent
 from lpvkoopman.nonaffine import frozen, level_limit_cycle
-from lpvkoopman.spectrum import dmd_eigenvalues
 from lpvkoopman.vdp_benchmark import sample_interior
 
-TS = 0.01
-U_MAX = 1.15  # test signals stay just inside the trained range [-1.2, 1.2]
-
-
-def get_model(cache: Path, quick: bool):
-    if cache.exists():
-        return pickle.load(open(cache, "rb"))
-    n_levels, n_traj = (17, 10) if quick else (25, 12)
-    data = make_extended_training_data(
-        vdp_nonaffine(),
-        np.linspace(-1.2, 1.2, n_levels),
-        n_traj_per_level=n_traj,
-        horizon=7.0,
-        ts=TS,
-    )
-    base = dmd_eigenvalues(data.X, data.ts)
-    base = base[np.abs(base) > 1e-6]  # drop the exact lambda=0 of x3
-    model, report = fit_koopman_model(
-        data,
-        FitConfig(
-            n_eig=[20, 20, 1],
-            constant_components=(2,),
-            alpha_bounds=(-20.0, 1.5),
-            base_eigs=base,
-            boundary_rcond=1e-3,
-        ),
-    )
-    cache.parent.mkdir(parents=True, exist_ok=True)
-    pickle.dump((model, data, report.components), open(cache, "wb"))
-    return model, data, report.components
+MAX_DX = 0.05  # LPV rollout sub-step bound on |x3| per sub-step (half the plane spacing)
 
 
 def make_u_profile(kind: str, rng, K: int) -> np.ndarray:
@@ -131,7 +89,6 @@ def main() -> int:
     figdir.mkdir(parents=True, exist_ok=True)
 
     sysna = vdp_nonaffine()
-    ext = extend_input(sysna)
 
     # ---------------- fig11: the input law -------------------------------
     fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
@@ -234,59 +191,16 @@ def main() -> int:
     plt.close(fig)
 
     # ---------------- input models ----------------------------------------
-    # B(x) sample cloud: interiors of the frozen-u limit cycles at midpoints
-    # between training levels (plus the inner levels themselves)
-    pts = []
-    rng2 = np.random.default_rng(5)
-    n_b_levels = 16 if args.quick else 24
-    n_b_pts = 80 if args.quick else 150
-    for u in np.linspace(-U_MAX, U_MAX, n_b_levels):
-        lc = level_limit_cycle(sysna, u)
-        xy = sample_interior(lc, n_b_pts, rng2, shrink=0.9)
-        pts.append(np.column_stack([xy, np.full(len(xy), u)]))
-    fit_pts = np.vstack(pts)
-    du = levels[1] - levels[0]
-    fd_opts = dict(h=np.array([2e-3, 2e-3, du / 2]), order=2)
-
     t0 = time.perf_counter()
-    b_lpv = fit_b_knn(
-        model, ext.g, fit_pts, k=20, f=ext.f, method="fd", options=fd_opts, blend=0.3
-    )
-    b_poly = fit_b_field(model, ext.g, fit_pts, degree=3, f=ext.f, method="fd", options=fd_opts)
-    b_const_auto = fit_b_field(model, ext.g, fit_pts, degree=0, f=ext.f, method="fd", options=fd_opts)
-    print(f"B(x) models from autonomous data ({time.perf_counter()-t0:.0f}s)")
-
-    # Korda-Mezic constant B: least squares on forced experiments
-    # (white-noise ZOH v decorrelates the input from the autonomous model
-    # residual - block inputs gave a visibly worse-biased regression)
-    rng3 = np.random.default_rng(9)
-    forced = []
-    t0 = time.perf_counter()
-    for _ in range(60):
-        u0 = rng3.uniform(-1.0, 1.0)
-        lc = level_limit_cycle(sysna, u0)
-        x0 = sample_interior(lc, 1, rng3, shrink=0.8)[0]
-        K = 150
-        v = rng3.uniform(-3.0, 3.0, K)
-        u, vv = u0, v.copy()
-        for k in range(K):
-            un = u + vv[k] * TS
-            if abs(un) > U_MAX:
-                vv[k] = 0.0
-            else:
-                u = un
-        forced.append((simulate_true(sysna, x0, u0, vv, TS), vv))
-    b_km = fit_constant_b_forced(model, forced, TS)
-    print(f"Korda-Mezic constant B from {len(forced)} forced experiments "
-          f"({time.perf_counter()-t0:.0f}s)")
-    b_zero = np.zeros((model.N, 1))
-
+    Bm = fit_input_models(model, data, args.quick)
+    print(f"input models: LPV fields from autonomous data, Korda-Mezic constant B "
+          f"from 60 forced experiments ({time.perf_counter()-t0:.0f}s)")
     candidates = [
-        ("lpv_knn", b_lpv),
-        ("lpv_poly3", b_poly),
-        ("km_const_forced", b_km),
-        ("const_auto", b_const_auto),
-        ("zero_B", b_zero),
+        ("lpv_knn", Bm["lpv_knn"]),
+        ("lpv_poly3", Bm["lpv_poly3"]),
+        ("km_const_forced", Bm["km_const_forced"]),
+        ("const_auto", Bm["const_auto"]),
+        ("zero_B", np.zeros((model.N, 1))),
     ]
 
     # ---------------- forced comparison ------------------------------------
@@ -308,7 +222,8 @@ def main() -> int:
             xe0 = np.array([*x0, u0])
             preds = {}
             for nm, bb in candidates:
-                xp = predict_forced(model, bb, xe0, v, TS, x_clip=(lo, hi))
+                xp = predict_forced(model, bb, xe0, v, TS, x_clip=(lo, hi),
+                                    max_dx=MAX_DX)
                 rows[nm].append(relative_rmse_percent(xp[:, :2], xt[:, :2]))
                 preds[nm] = xp
             cases.append((xt, preds, u_way))
@@ -340,12 +255,9 @@ def main() -> int:
         for row in range(2):
             ax = axes[row, col]
             ax.plot(t_plot, xt[:, row], "b-", lw=1.8, label="true")
-            ax.plot(t_plot, preds["lpv_knn"][:, row], "r--", lw=1.5,
-                    label="LPV $B(x)$ (ours, knn, autonomous data)")
-            ax.plot(t_plot, preds["lpv_poly3"][:, row], "m--", lw=1.5,
-                    label="LPV $B(x)$ (ours, poly, autonomous data)")
-            ax.plot(t_plot, preds["km_const_forced"][:, row], "g-.", lw=1.5,
-                    label="constant $B$ (Korda-Mezic, forced data)")
+            for key, lab, colr in (LPV, KM):
+                ax.plot(t_plot, preds[key][:, row], "--", color=colr, lw=1.5,
+                        label=lab)
             if row == 0:
                 ax.set_title(f"{kind}:  LPV {e_lpv:.1f}%  vs  const {e_km:.1f}%",
                              fontsize=10)
@@ -359,28 +271,27 @@ def main() -> int:
     axes[0, 0].legend(fontsize=8, loc="best")
     axes[2, 0].text(0.02, 0.85, "shaded: reversed-gain region",
                     transform=axes[2, 0].transAxes, fontsize=8)
-    fig.suptitle("Forced prediction on the non-affine plant: true vs LPV B(x) vs constant B "
+    fig.suptitle("Forced prediction on the extended plant: true vs LPV B(x) vs constant B "
                  "(median-LPV-error case per family)")
     fig.tight_layout()
     fig.savefig(figdir / "fig13_forced_comparison.svg", dpi=150)
     plt.close(fig)
 
     # ---------------- fig14: error statistics ------------------------------
-    fig, axes = plt.subplots(1, 3, figsize=(13.0, 4.4), sharey=True)
-    show = ["lpv_knn", "lpv_poly3", "km_const_forced", "const_auto", "zero_B"]
-    labels = ["LPV kNN\n(ours)", "LPV poly3\n(ours)", "const B\n(K-M, forced)",
-              "const B\n(auton.)", "B = 0"]
+    fig, axes = plt.subplots(1, 3, figsize=(11.0, 4.4), sharey=True)
+    show = [LPV, KM]
+    labels = ["LPV $B(x)$\n(ours, autonomous)", "constant $B$\n(Korda-Mezic, forced)"]
     for ax, kind in zip(axes, ["gentle", "dwell", "sweep"]):
-        errs = [suites[kind]["_errors"][nm] for nm in show]
+        errs = [suites[kind]["_errors"][key] for key, _, _ in show]
         bp = ax.boxplot(errs, tick_labels=labels, showfliers=False, patch_artist=True)
-        for patch, c in zip(bp["boxes"], ["#d62728", "#ff9896", "#2ca02c", "#98df8a", "#7f7f7f"]):
+        for patch, (_, _, c) in zip(bp["boxes"], show):
             patch.set_facecolor(c); patch.set_alpha(0.6)
         ax.set_yscale("log")
         ax.set_title(f"{kind} (n={n_test})")
         ax.grid(alpha=0.3, axis="y")
-        ax.tick_params(axis="x", labelsize=7)
+        ax.tick_params(axis="x", labelsize=8)
     axes[0].set_ylabel("forced prediction error [%] (1.5 s)")
-    fig.suptitle("Forced prediction error by input model")
+    fig.suptitle("Forced prediction error, LPV B(x) vs Korda-Mezic constant B")
     fig.tight_layout()
     fig.savefig(figdir / "fig14_forced_error_stats.svg", dpi=150)
     plt.close(fig)

@@ -1,195 +1,202 @@
-# Validation report — LPV input matrix B(x) and Koopman-LPV MPC (Van der Pol)
+# Validation report — LPV input matrix B(x) and Koopman-LPV MPC on the input-extended Van der Pol
 
-Part 1 (§1–§7) covers the input-affine plant; part 2 (§8–§11) covers the
-non-affine plant through its exact input extension, and the LPV-vs-constant-B
-controller comparison.
+Every experiment here runs on the non-affine plant `vdp_nonaffine` in its
+exact input-affine extension,
 
-# Part 1 — the input-affine plant
+    ẋ1 = 2 x2,   ẋ2 = −0.8 x1 + 2 x2 − 10 x1² x2 + w(x1, x2, x3),   ẋ3 = v
+    w = (0.15 + 0.5 x2) sin(2 x3) + 0.25 x1 x3²,    x3 := u,  v := u̇,
 
-Phase-2 results, building on the autonomous model of
-[`validation_vdp.md`](validation_vdp.md) (N = 40, 7 s data, 0.83 %
-autonomous prediction error). Reproduce with
-`python examples/run_vdp_control_benchmark.py` (~3 min) and
-`python examples/run_vdp_mpc.py` (~4 min); numbers land in
-`reports/results_control.json` / `results_mpc.json`.
+with the shared N = 40+1 model (25 u-levels × 12 trajectories, 7 s;
+[`validation_vdp.md`](validation_vdp.md)) and the same two input
+matrices: **LPV B(x) = ∂Φ/∂x₃**, built from autonomous data only, and the
+**Korda–Mezić constant B**, regressed on 60 forced experiments. Both come
+from `examples/extended_vdp.py`; every figure compares only those two.
 
-**Headline: the thesis's central claim is validated end-to-end.** The
-state-dependent input matrix B(x) = ∂Φ/∂x·g_c(x) built **exclusively from
-autonomous trajectory data** (no forced experiments anywhere) delivers
-forced-prediction accuracy competitive with — and on one of two benchmark
-signals better than — Korda & Mezić's constant B that was *fitted to
-forced data*, and it supports a real-time MPC that stabilizes the unstable
-origin and tracks moving references on the true nonlinear plant.
+Part 1 (§1–§4) evaluates forced prediction under the Korda & Mezić (2020)
+controlled test signals. Part 2 (§5–§9) runs closed-loop MPC on the true
+plant. Reproduce with `python examples/run_vdp_control_benchmark.py`
+(~6 min) and `python examples/run_vdp_mpc.py` (~1.5 min); numbers land in
+`reports/results_control.json` and `results_mpc.json`. The plant itself,
+the extension, and the forced comparison on three dedicated input families
+are in [`validation_nonaffine.md`](validation_nonaffine.md).
 
-## 1. Eigenfunction gradients (the make-or-break ingredient)
+# Part 1 — forced prediction under the Korda–Mezić test signals
 
-B(x) needs ∂Φ/∂x; Φ is known as tabulated values on the trajectory cloud.
-Quality is measured by the eigenfunction-PDE residual
-‖(∂Φ/∂x)f − AΦ‖/‖AΦ‖, which is exactly zero along trajectories for the
-ideal construction (200 interior test points):
+**Headline.** On the paper's square wave, the LPV field built from autonomous
+data beats the forced-data constant B by a factor of 20–27 (median 7.7 % vs
+157 % at unit amplitude, 3.0 % vs 81 % at amplitude 0.5). On the paper's
+fast 60 ms sine the order flips: the constant B wins (5.3 % vs 11.3 %),
+and the autonomous-only "no input model" control beats both. Input speed,
+not only input nonlinearity, decides which model wins (§3).
+
+## 1. Eigenfunction gradients on the extended model
+
+B(x) needs ∂Φ/∂x; Φ is known only as tabulated values on the trajectory
+cloud, a stack of 25 constant-u planes. The eigenfunction-PDE residual
+‖(∂Φ/∂x)f − AΦ‖/‖AΦ‖ is the standard quality check, evaluated here at 300
+points between and on the planes:
 
 | gradient estimator | median residual | p90 |
 |---|---|---|
-| **moving least squares (k=40, quadratic)** | **0.026** | 2.4 |
-| central FD on interpolant, h=1e-3, order 4 | 0.093 | 2.8 |
-| central FD, h=0.01, order 4 | 0.051 | 3.0 |
-| central FD, **h=0.1, order 2 (the thesis/MATLAB default)** | **0.62** | 43 |
+| n-D moving least squares (k=40, quadratic) | 0.49 | 85 |
+| **FD, per-dimension steps (ours: 2e-3 in-plane, 0.05 across)** | **0.18** | **0.98** |
+| FD, scalar h = 1e-3 | 0.21 | 1.0 |
+| FD, scalar h = 0.01 | 0.087 | 0.91 |
+| FD, scalar h = 0.1 (the thesis/MATLAB default) | 0.37 | 1.7 |
 
-Two findings: (i) MLS is the best estimator and is used throughout;
-(ii) the reference implementation's `build_B_numgrad` default step
-h = 0.1 destroys the gradients (62 % median error) — eigenfunction
-features near the origin are smaller than the stencil. This is another
-structural defect of the original pipeline, now quantified.
+Two caveats shape how to read this table:
 
-## 2. Raw pointwise B(x) is exact-in-principle but unusable — and the fix
+* **The residual cannot see ∂Φ/∂x₃.** The extended field f has a zero third
+  component, so (∂Φ/∂x)f only probes the in-plane derivatives. B needs
+  exactly the derivative the residual ignores. The table ranks in-plane
+  quality (where a coarser scalar step happens to win); B quality is judged
+  by the implied input gain (§4) and by rollouts (§3).
+* **MLS is blind across planes.** Its k nearest neighbours almost all share
+  one u-plane, so its local quadratic is ill-posed in x₃; hence the 85 p90.
+  This is why the pipeline uses FD with a cross-plane step of half the
+  plane spacing (README design decision 8).
 
-Raw MLS gradients give ‖B(x)‖ with median ≈ 1.5e4 in the interior,
-≈ 4e5 within 0.05 of the limit cycle, max ≈ 2e7: the individual
-eigenfunction surfaces are steep (their reconstruction relies on
-cancellation), so pointwise B estimates are huge and noisy. Rolling the
-lifted model forward with them injects O(‖B_err‖) into expanding modes
-every step — forced predictions **explode** (median error 21,556 % on the
-square wave).
+## 2. Raw pointwise B(x) vs. the smoothed field
 
-The fix, still autonomous-data-only (`fit_b_field`): fit one global
-low-order polynomial per lifted row of B(x) over the operating region,
-weighting samples by PDE-residual quality. This denoises and bounds the
-field while preserving its state dependence; its output projection
-C·B(x) lands within ~10 % of the exact value [0, 1] everywhere
-(fig8_B_gain_map.png). Degree 0 of the same fit provides the constant-B
-(LTI) baseline.
+Raw FD samples of B(x) = ∂Φ/∂x₃ have moderate magnitude (median ‖B‖ = 1.2,
+max 10.6; the smoothed kNN field has median 1.1 and the K-M constant 2.1),
+but they are noisy from point to point. Used directly in rollouts they give
+33–112 % median error on the four test signals below, against 3–11 % for
+the smoothed field. The field is therefore always smoothed before use:
+`fit_b_knn` averages the k = 20 nearest raw samples with PDE-residual
+reliability weights and blends toward the weighted-mean constant where the
+local samples are unreliable
+([`validation_nonaffine.md`](validation_nonaffine.md) §6). It is still
+built from autonomous data only.
 
-## 3. Forced prediction vs. the published controlled benchmark
+## 3. Forced prediction under the paper's test signals
 
-Paper protocol (Sec. VI-A controlled): unit-amplitude square wave
-(300 ms period) and sine (60 ms period), 1 s horizon, eq. (55) error;
-250 ICs uniform over the limit-cycle interior. Reference: Table I,
-N = 20 optimized, with **constant B identified from a dedicated forced
-dataset**: square 6.0 %, sine 2.9 %.
+Korda & Mezić's controlled benchmark drives the input with a square wave
+(300 ms period) and a sine (60 ms period) over 1 s. Here the same
+waveforms drive the physical input u, realized in the extended system as
+piecewise-linear u through the waveform's samples (ZOH v = Δu/Tₛ). At the
+paper's unit amplitude, u sits past the gain flip at |u| = π/4; at 0.5 it
+stays inside the monotone-gain region. 250 initial conditions per signal,
+uniform over the interior of the limit cycle at the starting level u(0);
+error eq. (55) on (x₁, x₂). Median (mean) %:
 
-| input model (ours: autonomous data only) | square: mean / median | sine: mean / median |
-|---|---|---|
-| **LPV B(x), polynomial deg 4** | **8.4 % / 6.5 %** | **1.30 % / 1.03 %** |
-| constant B (deg-0 reduction) | 12.6 % / 8.4 % | 1.61 % / 1.17 % |
-| raw pointwise MLS B(x) | 2.9e7 % / 21,556 % | 1.9e7 % / 1.15 % |
-| paper (constant B from forced data) | 6.0 % | 2.9 % |
+| signal | **LPV B(x) (ours)** | **K-M constant B (forced)** | *abl.:* LPV poly3 | *abl.:* constant B (auton.) | *abl.:* raw pointwise B |
+|---|---|---|---|---|---|
+| square, A = 1 | **7.7** (27.9) | 157.3 (197.8) | 12.9 (35.5) | 6.9 (27.5) | 83.4 (112.6) |
+| sine, A = 1 | 11.3 (16.7) | **5.3** (7.0) | 11.6 (13.1) | 3.5 (5.4) | 111.5 (256.0) |
+| square, A = 0.5 | **3.0** (10.2) | 80.6 (103.3) | 7.5 (15.5) | 5.1 (14.7) | 33.9 (121.0) |
+| sine, A = 0.5 | 3.6 (6.5) | **2.4** (4.0) | 7.0 (7.5) | 1.6 (3.1) | 40.4 (181.7) |
 
-* **Sine: 1.30 % vs. the paper's 2.9 %** — better, with zero forced data.
-* Square: 8.4 % vs. 6.0 % — same ballpark; the square wave's ±1 plateaus
-  push trajectories across (and partly beyond) the trained region, where
-  the near-LC error band of the autonomous model (see Phase-1 report §4)
-  is re-excited at every switch. Error is concentrated near the limit
-  cycle (fig7_forced_error_map.png), exactly as in the paper's own Fig. 4.
-* **The LPV field beats its own constant reduction by ~1.5× on the square
-  wave** — direct evidence of the value of state dependence, isolated
-  from every other pipeline ingredient (same model, same fit, same data).
+For orientation only, the paper's 2-D affine benchmark reports 6.0 %
+(square) and 2.9 % (sine) for its forced-data constant B. That is a
+different plant (input entering linearly as ẋ₂ += u), so it is not a
+like-for-like comparison.
+
+* **Square wave: LPV ≫ K-M constant**, 20× at A = 1 and 27× at A = 0.5. The
+  K-M regression's failure mode is the one documented in
+  [`validation_nonaffine.md`](validation_nonaffine.md) §6: the one-step
+  residual absorbs autonomous model error correlated with v, and a single
+  B cannot follow a gain whose sign flips. The constant reduction of our
+  own field is competitive at A = 1 (6.9 %), where u spends its time on the
+  ±1 plateaus and only the jumps exercise the input model.
+* **Fast sine: the constant wins.** With a 60 ms period, u swings through
+  its full range ~17 times in the 1 s window, far faster than the plant
+  responds, so the net input effect over each period nearly cancels (the
+  autonomous constant does best of all). An exact
+  gradient B = ∂Φ/∂x₃ integrates to zero around a closed x₃ loop, but the
+  smoothed field is not an exact gradient, so its errors accumulate over the
+  ~17 sweeps of the window. The best constant has no such drift.
+* **Sub-stepping is required.** With ZOH v, x₃ moves up to 2.0 within one
+  10 ms step (square jumps), across 20 training planes, while the naive
+  rollout freezes B(x) at the step's start. `predict_forced(...,
+  max_dx=0.05)` splits each step so that x₃ moves at most half a plane
+  spacing per B evaluation. In prototyping (40 ICs, A = 1) this took the
+  LPV square-wave median from 71 % to 7.5 % and the sine from 161 % to
+  12 %. It is an exact no-op for constant B (README design decision 14).
+* Errors concentrate near the starting level's limit cycle (fig7), as in
+  every other benchmark here: the time-depth limit of the eigenfunction
+  construction, [`validation_vdp.md`](validation_vdp.md) §4.
 
 ![forced predictions](figures/fig6_forced_predictions.png)
+
+*Fig. 6 — true vs. LPV vs. K-M constant under the two waveforms (A = 1),
+for a mid-interior and a near-cycle initial condition each.*
+
 ![forced error map](figures/fig7_forced_error_map.png)
-![B gain map](figures/fig8_B_gain_map.png)
 
-## 4. Koopman-LPV MPC on the true plant
+*Fig. 7 — square-wave error per initial condition, both models on one log
+color scale.*
 
-Controller: lift measured state, freeze B(x_k) over the horizon
-(exact ZOH discretization, closed-form blockwise Γ = A⁻¹(e^{ATs}−I)),
-solve the condensed tracking problem as a box-constrained least-squares
-(`scipy.optimize.lsq_linear` — no extra QP dependency), apply u₀,
-repeat at 100 Hz. Solve time ≈ 11 ms/step (horizon 80, N = 40, pure
-Python) — real-time-rate feasible.
+## 4. The input gain each model implies
 
-| task | result |
-|---|---|
-| **Stabilize the unstable origin** from 92 % of the limit-cycle radius, \|u\| ≤ 1 | ‖x‖: 0.69 → 3.7e-2 (2 s) → 1.4e-3 (4 s) → **5.4e-5 (6 s)**; open loop diverges to the cycle |
-| **Track x₁ = 0.3 sin(1.2t)** | **RMS error 0.0041 (1.4 % of amplitude)**, max error 0.0069 |
-| Piecewise-constant setpoints x₁ = ±0.25 (offset-free variant) | settled RMS 0.066; first setpoint settles cleanly (u → 0.20, the exact equilibrium input), later segments ring after reference jumps — see §5 |
+The plant's input gain is ∂ẋ₂/∂u = 2(0.15 + 0.5x₂)cos(2u) + 0.5x₁u. A
+lifted model implies the gain (C A B)₂ / (C B)₃: a step in v moves x₃ by
+(CB)₃ and, through the autonomous lifted dynamics, ẋ₂ by (CAB)₂. Evaluated
+on the slice x₁ = 0 inside each level's limit cycle (fig8):
 
-![stabilization](figures/fig9_mpc_stabilization.png)
-![tracking](figures/fig10_mpc_tracking.png)
+| input model | gain RMSE | sign agreement |
+|---|---|---|
+| **LPV B(x), kNN (ours)** | **0.17** | **80 %** |
+| **K-M constant B (forced)** | 0.31 | 58 % |
+| *ablation:* LPV poly3 | 0.084 | 85 % |
+| *ablation:* constant B (autonomous) | 0.30 | 58 % |
+| (zero gain, for scale) | 0.32 | — |
 
-## 5. Documented limitation: stationarity bias at off-origin setpoints
+Both constants imply one number everywhere: they get the sign right only
+where the true gain happens to share it (58 % of the slice), and their
+RMSE is barely below that of predicting zero gain. The LPV field recovers
+the gain's structure, including the sign flip at x₂ = −0.3 and the
+reversal past |u| = π/4. The global polynomial is the better *gain*
+estimator on this slice, but the worse rollout model (§3; and
+[`validation_nonaffine.md`](validation_nonaffine.md) §5), because rollouts
+also depend on the lifted coordinates that never enter (CAB)₂.
 
-Constant-setpoint regulation exposes a structural weakness, with a clean
-diagnosis:
-
-* Open-loop, from the true equilibrium (0.25, 0) under the true
-  equilibrium input u* = 0.2, the lifted model holds position for
-  ≈ 0.5 s and then drifts (to (0.19, −0.18) by 1 s).
-* Inverting the model for the stationary input at (±0.25, 0) gives
-  u_ff ≈ ±0.78 versus the true ±0.2 — a ~4× bias.
-
-Root cause: the model is trained (and excellent) at predicting **along
-flows**; pointwise stationarity C(Az + B(x)u) = 0 requires exact
-cancellation between large lifted terms, which magnifies small fitting
-errors. Feedback hides most of this (the loop holds the setpoint to
-within 0.03–0.06), an output-disturbance estimator (`offset_free=True`)
-removes part of the rest, but ~0.05 of bias/ringing survives reference
-jumps. Integral action with naive anti-windup made it worse (tested).
-Remedies for the next iteration: equilibrium-anchored local correction of
-(A, B) around target setpoints, or a disturbance model in the lifted
-state rather than the output.
-
-## 6. What carries over from the references — and what was changed
-
-* Iacob et al. (2024): B(x) = ∂Φ/∂x·g_c(x) — implemented as stated; the
-  *practical* contribution here is the residual-weighted smooth field fit
-  (§2), without which the exact formula is numerically unusable on a
-  system with expanding modes.
-* Thesis: gradient-based B from autonomous data — vindicated; its
-  finite-difference defaults (h = 0.1) and the absence of field smoothing
-  explain why this step underperformed in the original pipeline. The
-  thesis's stable-equilibrium case studies (Duffing, pendulum) were also
-  far more forgiving: contracting A absorbs B-noise injections, VdP's
-  expanding A amplifies them.
-* MPC: standard qLPV-Koopman scheme (freeze B at the measured state per
-  step). Box-constrained-input QP solved exactly via bounded least
-  squares; state constraints and a proper QP solver (e.g. OSQP) are the
-  natural extension when needed.
-
-## 7. Open items for the next iteration
-
-* Stationarity-bias correction at setpoints (§5) — the one blocker for
-  precision regulation away from the origin.
-* Square-wave-class inputs that drive the state outside the trained
-  region: extend training coverage outward (the bidirectional sampler in
-  `systems.generate_data` is ready for this) or add input-aware data.
-* State/output constraints in the MPC (switch to a general QP solver).
-* Multi-input systems and the vehicle models from the thesis: the entire
-  B(x)/MPC path is written for m ≥ 1, only the 2-D MLS gradient kernel
-  assumes n = 2 and needs the trivial generalization.
-* Iacob et al.'s LTI-vs-LPV error bounds: quantify them on this example
-  and compare with the measured 1.5× square-wave gap.
+![input gain map](figures/fig8_input_gain_map.png)
 
 ---
 
-# Part 2 — MPC on the *non*-affine plant (LPV B(x) vs constant B)
+# Part 2 — Koopman-LPV MPC on the extended plant (LPV B(x) vs constant B)
 
-Everything above concerns the input-affine plant `vdp_scaled`. This part
-runs the same three tasks on `vdp_nonaffine` through its exact input
-extension (x₃ = u, v = u̇), with the *same* lifted dynamics driven by two
+Three closed-loop tasks on the true plant, run through its exact extension
+(x₃ = u, v = u̇) with the *same* lifted dynamics driven by the two
 competing input models: the LPV field B(x) from autonomous data, and the
 Korda–Mezić constant B fitted to 60 forced experiments. Reproduce with
-`python examples/run_vdp_mpc.py`; figures fig15–fig17, numbers under the
-`nonaffine` key of `results_mpc.json`.
+`python examples/run_vdp_mpc.py`; figures fig9, fig10 and fig15, numbers in
+`results_mpc.json`.
+
+Controller: lift the measured extended state, freeze B(x_k) over the
+horizon (exact ZOH discretization, closed-form blockwise
+Γ = A⁻¹(e^{ATs}−I)), solve the condensed tracking problem as a
+box-constrained least-squares problem (`scipy.optimize.lsq_linear`, so no
+extra QP dependency), apply the first move, and repeat.
+
+## 5. Overview
 
 **Headline, in two halves.** On *stabilization* the separation is large and
 one-sided, but it is **transient, not asymptotic**: the LPV field pulls the
-state to ‖x‖ = 1.4e-2 and holds it near the origin for ~9 s before losing
-it, while the constant B never gets closer to the origin than its own
+state to ‖x‖ ≈ 2e-2 and holds it near the origin for several seconds before
+losing it, while the constant B never gets closer to the origin than its own
 initial condition and failed in all 432 of its closed-loop runs, under every
 one of 72 weight configurations. On *off-origin reference tracking* the LPV
 field does not win at all — the constant's own optimum is better on the sine
 task, and both arms fail on switching setpoints. The advantage this route
 buys is real but considerably narrower than the forced-prediction study
-alone would suggest (§9).
+alone would suggest (§7).
 
 Getting to a comparison that measures model quality rather than actuator
 saturation required three corrections to the original setup, each of which
-is a finding in its own right (§8), and the residual tracking error is then
-model error rather than a plant limit (§10).
+is a finding in its own right (§6), and the residual tracking error is then
+model error rather than a plant limit (§8).
 
-## 8. Three corrections to the non-affine MPC setup
+![MPC stabilization](figures/fig9_mpc_stabilization.png)
 
-### 8.1 The controller was boxing the wrong variable
+![MPC tracking](figures/fig10_mpc_tracking.png)
+
+![actuation limits](figures/fig15_actuation_limits.png)
+
+## 6. Three corrections to the MPC setup
+
+### 6.1 The controller was boxing the wrong variable
 
 For the extended plant the MPC's decision variable is v = u̇; the physical
 actuator command is the extra **state** x₃ = u. The original setup left
@@ -215,13 +222,13 @@ decision variable  w = [u_1 … u_Np],   bounds [−U_MAX, U_MAX]
 v = (D w − e₀u₀)/ts    (D = I − shift)
 ```
 
-Implemented as `MPCConfig.integrator_state`; it is opt-in, so the affine
-sections are untouched. Verified to reproduce the direct solve to 1e-13
+Implemented as `MPCConfig.integrator_state`; it is opt-in, so an MPC whose
+decision variable is the actuator itself is unchanged. Verified to reproduce the direct solve to 1e-13
 when the box is inactive, confirming the substitution is exact and not an
 approximation. `KoopmanMPC` also gained the `x_clip` guard that
 `predict_forced` already had.
 
-### 8.2 The horizon was five times too short
+### 6.2 The horizon was five times too short
 
 With the input bounded correctly the loop still failed. The reason is
 geometric: the origin is an unstable **focus** with eigenvalues 1 ± 0.775i,
@@ -245,22 +252,21 @@ solve, which is not real-time — and 12 s is *worse* than 8 s, because model
 error accumulates over the prediction faster than the extra foresight is
 worth. The chosen operating point is ts = 0.10 s, Np = 80.
 
-### 8.3 All three tasks were outside the plant's reach
+### 6.3 Task sizes are set by the plant's actuation limits
 
-This is the finding that explains the original figures. The affine plant
-has g = (0, 1): authority ±1.0 on ẋ₂, with |u| ≤ 1. The non-affine plant's
-input enters as
+The input enters as
 
 ```
 w(x,u) = (0.15 + 0.5 x₂) sin(2u) + 0.25 x₁ u²,     |u| ≤ 1.15
 ```
 
-which at the origin is worth `0.15 sin(2u)` — **±0.15, about 1/7 of the
-affine plant's authority** — against the identical unstable focus with
-Re λ = 1. The three tasks were inherited verbatim from the affine
-benchmark and none of them survives the change of plant (fig17):
+which at the origin is worth `0.15 sin(2u)`: **±0.15 of authority on ẋ₂**,
+against an unstable focus with Re λ = 1. Tasks sized like the usual Van der
+Pol MPC demos (stabilize from 92 % of the limit-cycle radius, track a 0.3
+sine, hold ±0.25 setpoints) are all beyond this plant's reach, which fig15
+quantifies:
 
-| task | affine spec | demanded | achievable | verdict |
+| task | larger version | demanded | achievable | verdict |
 |---|---|---|---|---|
 | 1. stabilize from 0.92·lc | ‖x₀‖ = 0.692 | — | null-controllable reach **0.313** | **2.25× outside**; unreachable |
 | 2. sine A=0.3, ω=1.2 | — | ‖w‖ up to **0.360** | ≤ 0.253, and only ±0.06 at the worst instant | infeasible over **54 %** of the period |
@@ -269,13 +275,13 @@ benchmark and none of them survives the change of plant (fig17):
 The null-controllable region (the set of states steerable to the origin) is
 computed by reversing time and integrating the extremal bang-bang branches
 outward over a spread of switching times — for a planar single-input system
-that traces its boundary exactly. It reaches 0.313 in ‖x‖; the affine x₀
-sits at 0.692. This is confirmed independently by an *oracle* controller —
-a receding-horizon MPC given the true plant, a 3 s horizon and full
-knowledge — which pulls ‖x‖ to 0.28 by 2 s and then loses it back to 0.78
-by 6 s. **No controller can perform the original task 1**, so the
-bang-bang saturation visible in the old fig15/fig16 was the controller
-correctly failing at an impossible demand, not a tuning defect.
+that traces its boundary exactly. It reaches 0.313 in ‖x‖; a start at
+0.92·lc sits at 0.692. This is confirmed independently by an *oracle*
+controller — a receding-horizon MPC given the true plant, a 3 s horizon and
+full knowledge — which pulls ‖x‖ to 0.28 by 2 s and then loses it back to
+0.78 by 6 s. **No controller can perform the larger task 1**, so bang-bang
+saturation on those tasks would be the controller correctly failing at an
+impossible demand, not a tuning defect.
 
 #### The sharper limit: recoverable margin collapses at off-origin setpoints
 
@@ -298,10 +304,10 @@ the setpoint amplitude is 0.10 rather than the pointwise-feasible 0.20, and
 it is a genuine limitation of the input-extension approach on a plant whose
 gain is this weak, not an artifact of the Koopman model.
 
-Rescaled tasks: x₀ = 0.25·lc (‖x₀‖ = 0.19), sine A = 0.10 / ω = 0.8,
+Chosen tasks: x₀ = 0.25·lc (‖x₀‖ = 0.19), sine A = 0.10 / ω = 0.8,
 setpoints ±0.10 with a 4 s dwell.
 
-## 9. Weight selection under a bistable closed loop
+## 7. Weight selection under a bistable closed loop
 
 The tuned closed loop is **bistable**: it either holds the reference or
 escapes to the limit cycle, with essentially nothing in between. Adjacent
@@ -329,8 +335,8 @@ Both the shared-weight result and each arm's own optimum are given below.
 
 The q₃ entry weights the actuator channel x₃ = u. Under `integrator_state`
 the box already keeps u legal, so q₃ is a control-effort term — the
-extension's analogue of the affine problem's R‖u‖², since R here weighs
-u̇ instead. Larger q₃ and R both help by keeping the loop gentle and the
+analogue of a classical R‖u‖² effort penalty, since R here weighs u̇
+instead. Larger q₃ and R both help by keeping the loop gentle and the
 state inside the region where the model is trustworthy.
 
 ### What the three tasks actually show
@@ -349,12 +355,21 @@ Aggregated over all 72 configurations × 6 ICs = 432 runs per arm per task:
 
   | arm | min ‖x‖ reached | at t | dwell ‖x‖<0.1 | ‖x‖ at 20 s |
   |---|---|---|---|---|
-  | LPV B(x) | **1.4e-2** (from ‖x₀‖ = 0.188, a 13× reduction) | 8.7 s | **8.7 s** (t = 1.0 → 9.6 s) | 0.93 |
-  | constant B | **1.84e-1** — its own starting value | 0.2 s | **never** | 0.56 |
+  | LPV B(x) | **2.2e-2** (from ‖x₀‖ = 0.188, a 9× reduction) | 4.4 s | **3.8 s** (t = 1.1 → 4.8 s) | 0.65 |
+  | constant B | **1.84e-1** — its own starting value | 0.2 s | **never** | 0.79 |
 
-  The LPV field pulls the state to within 0.1 of the origin within 1 s,
-  holds it there for **8.7 s** (reaching 1.4e-2 at t = 8.7 s), and then
-  loses it around t = 10 s. The constant B **never gets closer to the
+  The LPV field pulls the state to within 0.1 of the origin within about
+  1 s, holds it there for **3.8 s** (reaching 2.2e-2 at t = 4.4 s), and
+  then loses it around t = 5 s.
+
+  *How long* the hold lasts is not a stable number. The closed loop is
+  deterministic, but perturbing x₀ by 1e-12 moves the hold interval to
+  4.7 s, by 1e-9 to 4.1 s. An earlier run of the same script, on the same
+  model and the same two input matrices, held for 8.7 s and reached
+  1.4e-2. Today's script reproduces bit-for-bit across processes, so the
+  cause of that earlier divergence was not traced, but it is well within
+  the spread that 1e-12 perturbations produce. The robust statistic is the
+  count over the weight sweep below, not any single run's escape time. The constant B **never gets closer to the
   origin than its own initial condition** — it never reaches ‖x‖ < 0.15 at
   any time, and it failed in every one of its 432 runs under every
   weighting tried. So the claim supported by the data is "the LPV field
@@ -362,7 +377,7 @@ Aggregated over all 72 configurations × 6 ICs = 432 runs per arm per task:
   approaches it at all", not "the LPV field stabilizes the plant".
 
   The escape has a consistent explanation. Relative forced-prediction
-  error stays at 15–40 % as ‖x‖ → 0 (§10), so once the state is small
+  error stays at 15–40 % as ‖x‖ → 0 (§8), so once the state is small
   enough the feedback is acting largely on model error while the unstable
   focus keeps its Re λ = 1 growth — the loop cannot win that race
   indefinitely. Mechanism for the *advantage*: the task holds u near 0 and
@@ -384,7 +399,7 @@ Aggregated over all 72 configurations × 6 ICs = 432 runs per arm per task:
   that keeps the state cycling through the region where the eigenfunction
   gradients are unreliable erodes it.
 * **Task 3 — both arms fail.** 71 of 72 configurations held zero times for
-  each arm. This is not a tuning failure: §8.3 shows the recoverable
+  each arm. This is not a tuning failure: §6.3 shows the recoverable
   margin above a setpoint collapses to 0.148 at r = 0.10, and the models
   carry 10–40 % (LPV) to 100–500 % (constant) forced-prediction error in
   that region, so overshoot past the recoverable boundary is essentially
@@ -396,15 +411,17 @@ The honest summary is that the input-extension + LPV-B route buys a real
 and large advantage for **stabilization**, and does not currently buy one
 for **off-origin reference tracking** on this plant.
 
-## 10. The residual tracking error is model error, not plant limitation
+## 8. The residual tracking error is model error, not plant limitation
 
 It would be easy to attribute the remaining tracking error to the plant's
 weak actuator. It is not that. An oracle controller that knows the true
 plant tracks the A = 0.10 sine at **RMS 0.0012 (1.2 % of amplitude)**,
 using only u ∈ [−0.30, +0.68] of the ±1.15 available — the task has ample
 margin. The best Koopman-MPC result anywhere in the sweep is RMS 0.062 —
-**~50× worse than achievable** — and the shared-weight runs that fig16
-reports are worse still (0.085 constant, 0.505 LPV).
+**~50× worse than achievable** — and the shared-weight runs that fig10
+reports are worse still (0.111 constant, 0.534 LPV: the constant arm
+stays bounded but is out of phase with the reference, the LPV arm escapes
+to the limit cycle at t ≈ 6.5 s).
 
 The gap is the lifted model's forced-prediction accuracy in the region
 these tasks occupy. Measured over 0.8 s rollouts near the origin:
@@ -427,29 +444,26 @@ the input model (denser autonomous sampling near the equilibrium, or a
 gradient estimator that stays accurate where Φ's features are smallest) —
 not from the MPC.
 
-## 11. Bugs fixed in `run_vdp_mpc.py`
+## 9. Bugs fixed in `run_vdp_mpc.py`
 
-The original non-affine section also carried a set of defects that made
-fig15 unreadable independently of control quality; recorded here because
+The first version of the MPC script also carried a set of defects that made
+the stabilization figure unreadable independently of control quality; recorded here because
 several produced *plausible-looking* output:
 
 * both `semilogy` calls plotted the same `nx` array, so the LPV curve was
   hidden underneath the constant-B one — the figure showed one run drawn
   twice;
-* both actuator traces plotted `stab.U`, the **affine** section's result;
 * `lc_lpv` leaked from the B-fitting loop, so the "limit cycle" drawn and
   the x₀ placed on it belonged to the u = +1.15 level, not u = 0;
 * `ax.plot(*x0, "bo")` with a 3-vector — matplotlib parses the third
   positional as data, producing the two spurious `$x_0$` legend entries;
 * the results dict used the key `"stabilization LPV nonaffine"` twice, so
   the constant-B entry silently overwrote the LPV one;
-* `results = {}` mid-function discarded the affine results, which were then
-  overwritten in `results_mpc.json` (both halves are now nested under
-  `affine` / `nonaffine`);
 * ‖x‖ was taken over all three states, mixing the actuator into the state
   norm;
 * the tracking figure labelled `res.U` as "u" — that is v = u̇; the
   actuator is `res.X[:, 2]`, now plotted on its own row;
 * `get_model_na` was a verbatim copy of `run_nonaffine_benchmark.get_model`
   referencing five names this module never imported — a guaranteed
-  `NameError` on any cache miss. It now imports the shared function.
+  `NameError` on any cache miss. The model and both input matrices now come
+  from the shared `examples/extended_vdp.py`.

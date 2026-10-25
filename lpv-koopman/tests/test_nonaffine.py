@@ -263,6 +263,31 @@ def test_predict_forced_clips_bmap_state():
     assert all(np.all(s <= hi + 1e-12) and np.all(s >= lo - 1e-12) for s in seen)
 
 
+def test_predict_forced_substeps_exact_and_reevaluate_b():
+    """max_dx splits a step into ZOH sub-steps: for a B that does not vary
+    they compose exactly to the single step, and a callable B is re-evaluated
+    at every sub-step."""
+    A = np.array([[0.0, 2.0], [-0.8, 2.0]])
+    sys2 = linear_system(A)
+    data = generate_data(
+        sys2, circle_initial_conditions(0.2, 24), horizon=2.0, ts=0.01
+    )
+    model, _ = fit_koopman_model(data, FitConfig(n_eig=4, optimize=False))
+    B = np.random.default_rng(3).normal(size=(model.N, 1))
+    calls = []
+
+    def bmap(x):
+        calls.append(1)
+        return B
+
+    u = np.array([5.0, -5.0, 0.5])
+    x0 = np.array([0.05, 0.0])
+    ref = predict_forced(model, B, x0, u, 0.01)
+    sub = predict_forced(model, bmap, x0, u, 0.01, max_dx=1e-3)
+    np.testing.assert_allclose(sub, ref, atol=1e-12)
+    assert len(calls) > len(u)
+
+
 # --------------------------------------------------------------------------
 # end-to-end smoke on the extended system
 # --------------------------------------------------------------------------

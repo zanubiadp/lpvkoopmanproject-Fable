@@ -3,6 +3,15 @@
 Companion to `examples/run_nonaffine_benchmark.py`; all numbers from a full
 run (`reports/results_nonaffine.json`), figures `reports/figures/fig11..14`.
 
+This is the core claim of the project. Every Van der Pol experiment in the
+repository runs on this plant in its extended form, with the same model and
+the same two input matrices (`examples/extended_vdp.py`): the autonomous
+benchmark ([`validation_vdp.md`](validation_vdp.md)), the forced benchmark
+under the Korda–Mezić test signals and the MPC
+([`validation_vdp_control.md`](validation_vdp_control.md)). The comparison
+figures show only those two models, LPV B(x) and the Korda–Mezić constant B;
+the other variants below are ablations reported in the tables.
+
 ## 1. The claim being tested
 
 Korda & Mezić (2020) and Iacob et al. (2024) both note that a system that is
@@ -78,8 +87,9 @@ that is precisely the regime the LPV matrix is for.
 | median | 1.0 % | 0.9 % | 0.8 % | 1.3 % | 2.8 % | 6.9 % | 5.2 % |
 | p90 | 7.6 % | 3.2 % | 2.1 % | 6.8 % | 14.1 % | 18.6 % | 25.2 % |
 
-Overall median 1.3 % — the same ballpark as the 2-D autonomous benchmark,
-i.e. **the pipeline survives the extension**: eigenfunction values
+Overall median 1.3 % — the same ballpark as the model's error on the
+trained x3 = 0 plane ([`validation_vdp.md`](validation_vdp.md)), i.e. **the
+pipeline survives the extension**: eigenfunction values
 interpolate cleanly *across* the u-planes. Positive levels are harder: the
 frozen-u slices there are more strongly unstable (linearization Re λ up to
 ≈ 1.0 vs ≈ 0.5 at u < 0), so one shared spectrum across all slices fits
@@ -89,7 +99,8 @@ initial conditions near those levels' limit cycles.
 ## 4. Input models compared
 
 All five run on the **same** lifted dynamics (same eigenfunctions, same A);
-they differ only in the lifted input matrix:
+they differ only in the lifted input matrix. All are built by
+`extended_vdp.fit_input_models`; figures show only the first and third:
 
 | tag | B | data used |
 |---|---|---|
@@ -97,25 +108,29 @@ they differ only in the lifted input matrix:
 | `lpv_poly3` (ours, variant) | same samples, one global degree-3 polynomial per lifted row | autonomous only |
 | `km_const_forced` | **Korda & Mezić recipe**: one constant B by least squares on one-step lifted residuals z⁺ − A_d z = Γ B v over 60 forced experiments (white-noise ZOH v, 1.5 s each) | forced |
 | `const_auto` | degree-0 reduction of the LPV field (the best constant available from autonomous data) | autonomous only |
-| `zero_B` | B = 0 in the (x1, x2) channels (x3 still integrates v exactly) | — |
+| `zero_B` | B = 0 everywhere, including the x3 row: x3 stays at its initial u, so this is the *autonomous* prediction at the initial input level | — |
 
-`zero_B` matters as a control: on the extended system the *nonlinearity of
-the input has moved into the autonomous part*, so even with no input model
-at all, the lifted A does much of the work. Any candidate must beat it to
-be adding value.
+`zero_B` matters as a control: it ignores the input entirely, so over
+short horizons where u moves little it is a surprisingly strong baseline.
+Any candidate must beat it to be adding value.
 
 ## 5. Results (fig13, fig14)
 
 Forced prediction over 1.5 s from interior initial conditions, 40 runs per
-family, error = eq. (55) on (x1, x2). Input families: **gentle** stays in
+family, error = eq. (55) on (x1, x2). LPV rollouts re-evaluate B(x) on
+sub-steps so that x3 moves at most 0.05 (half the plane spacing) per
+evaluation (`predict_forced(..., max_dx=0.05)`; exact no-op for constant
+B). These families move u slowly, so this changes only the sweep median,
+7.9 % → 8.0 %; it matters for the fast Korda–Mezić test signals
+([`validation_vdp_control.md`](validation_vdp_control.md) §3). Input families: **gentle** stays in
 the monotone-gain region |u| < π/4; **dwell** sits past the gain flip;
 **sweep** crosses it repeatedly. Median (mean) %:
 
-| input family | LPV B(x) **(ours, autonomous)** | K-M constant B (forced) | constant B (autonomous) | B = 0 |
-|---|---|---|---|---|
-| gentle | **3.5** (6.9) | 90.0 (98.2) | 7.2 (14.5) | 8.5 (16.1) |
-| dwell | **3.2** (9.6) | 60.7 (70.6) | 3.4 (7.4) | 4.6 (7.6) |
-| sweep | **7.9** (21.0) | 229.2 (276.0) | 14.5 (25.5) | 17.6 (29.8) |
+| input family | LPV B(x) **(ours, autonomous)** | K-M constant B (forced) | *ablation:* LPV poly3 | *ablation:* constant B (autonomous) | *ablation:* B = 0 |
+|---|---|---|---|---|---|
+| gentle | **3.5** (6.9) | 90.0 (98.2) | 5.5 (11.6) | 7.2 (14.5) | 8.5 (16.1) |
+| dwell | **3.2** (9.6) | 60.7 (70.6) | 5.2 (8.8) | 3.4 (7.4) | 4.6 (7.6) |
+| sweep | **8.0** (20.9) | 229.2 (276.0) | 14.4 (26.3) | 14.5 (25.5) | 17.6 (29.8) |
 
 * **LPV vs best constant: ≈ 2× better on gentle and sweep**, at parity on
   dwell (where trajectories converge to the limit cycle and the input
@@ -130,15 +145,19 @@ the monotone-gain region |u| < π/4; **dwell** sits past the gain flip;
 * The trajectory-level picture (fig13, median-LPV-error cases, not
   cherry-picked): the LPV rollout is barely distinguishable from the truth;
   the constant-B rollout bends the wrong way exactly when u dwells in the
-  reversed-gain band.
+  reversed-gain band. fig14 shows the full distributions of the two models:
+  the boxes do not overlap in any family.
 
 ![](figures/fig13_forced_comparison.svg)
 
+![](figures/fig14_forced_error_stats.svg)
+
 ## 6. What made it work (numbers from the prototyping runs)
 
-The naive port of the 2-D control pipeline **failed** — the first attempt
-had the LPV field *worse* than its own constant reduction (median 48 % vs
-10 % on sweeps). Three changes turned it around, all now defaults or
+The first version of the input pipeline (MLS gradients, a global
+polynomial B field, the default boundary-fit cutoff) **failed**: the LPV
+field was *worse* than its own constant reduction (median 48 % vs 10 % on
+sweeps). Three changes turned it around, all now defaults or
 options in the library:
 
 1. **Boundary-fit regularization** (`FitConfig.boundary_rcond = 1e−3`).
@@ -158,7 +177,8 @@ options in the library:
    response error 19 % → 14 % median.
 3. **Local smoothing with confidence blending** (`KnnBField`). Gradient
    sample quality is spatially bimodal: excellent in the interior, garbage
-   near each level's limit cycle (the known 2-D failure mode). A global
+   near each level's limit cycle (the time-depth failure mode of
+   [`validation_vdp.md`](validation_vdp.md) §4). A global
    polynomial couples the two regions — degree 3 both *flattens* the true
    gain variation and lets near-LC outliers bend the interior. Averaging
    the k = 20 nearest samples with PDE-residual weights keeps the local
@@ -191,7 +211,13 @@ whose true sign flips over the operating range.
   cycle where the gradients are unreliable; there the blended field
   degrades toward the constant (by design) and the constant becomes
   competitive again (5.0 % vs 8.7–11 % for LPV variants). The LPV advantage
-  is a *transient/interior* phenomenon — consistent with the 2-D findings.
+  is a *transient/interior* phenomenon — consistent with the near-cycle
+  analysis in [`validation_vdp.md`](validation_vdp.md) §4.
+* Input speed matters. Under the Korda–Mezić 60 ms sine on u, the
+  K-M constant beats the LPV field (5.3 % vs 11.3 % median). The input
+  effect averages out over each fast period, and the smoothed field is not
+  an exact gradient, so its errors accumulate across many back-and-forth
+  sweeps. See [`validation_vdp_control.md`](validation_vdp_control.md) §3.
 * The comparison gives the constant-B baseline *more* information than
   ours (60 forced experiments); the asymmetry is deliberate and makes the
   result stronger, not weaker.
